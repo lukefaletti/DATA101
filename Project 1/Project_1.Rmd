@@ -1,0 +1,116 @@
+---
+title: "Project_1"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+```
+
+## Importing and examining the data
+
+```{r loading}
+vgsales <- read.csv("vgsales.csv")
+head(vgsales)
+dim(vgsales)
+str(vgsales)
+```
+
+## Cleaning the data
+
+```{r cleaning}
+unique(vgsales$Year)
+table(vgsales$Year)
+group_by(vgsales, Year) %>%
+  summarize(Total_Sales = sum(Global_Sales)) %>%
+  print(n = 40)
+
+vgsales <- vgsales[!is.na(vgsales$Year), ]
+vgsales$Year <- as.numeric(vgsales$Year)
+vgsales <- vgsales[vgsales$Year < 37, ] # Removes years 2016, 2017, 2020, and NA
+vgsales$Year <- vgsales$Year + 1979 # Returns the numbers to the proper years
+unique(vgsales$Year)
+```
+
+## Analyzing the data
+```{r analysis}
+# Most popular games in North America
+vgsales[1:7] %>%
+  arrange(desc(NA_Sales)) %>%
+  head(10)
+
+# Most popular games in Europe
+vgsales[c(1:6, 8)] %>%
+  arrange(desc(EU_Sales)) %>%
+  head(10)
+
+# Most popular games in Japan
+vgsales[c(1:6, 9)] %>%
+  arrange(desc(JP_Sales)) %>%
+  head(10)
+
+# Years with the most total sales (measured in millions of units sold)
+vgsales %>%
+  group_by(Year) %>%
+  summarize(Total_Sales = sum(Global_Sales)) %>%
+  mutate(Percentage = 100 * Total_Sales / sum(Total_Sales)) %>%
+  arrange(desc(Total_Sales))
+
+# Genres with the most total sales (measured in millions of units sold)
+vgsales %>%
+  group_by(Genre) %>%
+  summarize(Total_Sales = sum(Global_Sales)) %>%
+  mutate(Percentage = 100 * Total_Sales / sum(Total_Sales)) %>%
+  arrange(desc(Total_Sales))
+
+# Publishers with the most total sales (measured in millions of units sold)
+vgsales %>%
+  group_by(Publisher) %>%
+  summarize(Total_Sales = sum(Global_Sales)) %>%
+  mutate(Percentage = 100 * Total_Sales / sum(Total_Sales)) %>%
+  arrange(desc(Total_Sales))
+
+# Publishers with the highest average sales per game (measured in thousands of units sold per game) [min: 5 games]
+vgsales %>%
+  group_by(Publisher) %>%
+  filter(n() > 5) %>%
+  summarize(Average_Sales_Per_Game = 1000 * sum(Global_Sales) / n(), Total_Games = n()) %>%
+  arrange(desc(Average_Sales_Per_Game))
+
+# Platforms with the most total games
+vgsales %>%
+  group_by(Platform) %>%
+  summarize(Total_Games = n()) %>%
+  mutate(Percentage = 100 * Total_Games / sum(Total_Games)) %>%
+  arrange(desc(Total_Games))
+
+# Platforms with the most total sales (measured in millions of units sold)
+vgsales %>%
+  group_by(Platform) %>%
+  summarize(Total_Sales = sum(Global_Sales)) %>%
+  mutate(Percentage = 100 * Total_Sales / sum(Total_Sales)) %>%
+  arrange(desc(Total_Sales))
+
+```
+
+
+## Displaying data
+
+```{r proportionPerGenre}
+ggplot(data = vgsales) + 
+  geom_bar(mapping = aes(x = Year, fill = Genre), position = "fill")
+```
+
+```{r salesPerGenre}
+vgsales %>% group_by(Year, Genre) %>%
+  summarize(Total_Sales = sum(Global_Sales)) %>% 
+  ggplot(mapping = aes(x = Year, y = Total_Sales, fill = Genre)) +
+    geom_bar(stat = "identity")
+
+vgsales %>% group_by(Year, Genre) %>%
+  summarize(Total_Sales = sum(Global_Sales)) %>% 
+  ggplot(mapping = aes(x = Year, y = Total_Sales, fill = Genre)) +
+    geom_bar(stat = "identity", position = "fill")
+```
