@@ -1,0 +1,241 @@
+---
+title: "Project 3: Statistical Inference"
+author:
+  - Luke Faletti
+  - Andres-Sebastian Melendez
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+library(boot)
+```
+
+## Importing the data
+
+The dataset we used is the Youth Tobacco Survey data taken from [Data.gov](https://catalog.data.gov/dataset/youth-tobacco-survey-yts-data-88e11). It contains data on cigarette usage and other smoking questions from surveyed middle schools and high schools between 1999 and 2017.
+
+```{r}
+survey <- read.csv("Youth_Tobacco_Survey__YTS__Data.csv")
+dim(survey)
+str(survey)
+head(survey)
+```
+
+We see some NA values. How many are there?
+
+```{r}
+nrow(survey) - sum(complete.cases(survey))
+sum(!complete.cases(survey)) / nrow(survey)
+```
+
+## Making the data more usable and analyzing NA values
+
+We can remove some columns:
+
+| Column Label                 | Reason                                                              |
+| ---------------------------- | ------------------------------------------------------------------- |
+| LocationDesc                 | Using data from LocationAbbr is easier                              |
+| TopicType                    | Same value for all data ("Tobacco Use Survey Data")                 |
+| DataSource                   | Unable to find difference between values "NYTS" and "YTS"           |
+| Data_Value_Unit              | Same value for all data ("%")                                       |
+| Data_Value_Type              | Same value for all data ("Percentage")                              |
+| Data_Value_Footnote_Symbol   | Contains "*" if values are NA                                       |
+| Data_Value_Footnote          | States that NA data was removed due to small sample sizes           |
+| Race                         | Same value for all data ("All Races")                               |
+| Age                          | Same value for all data ("All Ages")                                |
+| GeoLocation                  | Unnecessary unless delving deeper than state-by-state comparisons   |
+| Everything after GeoLocation | All subsequent columns just contain ID values for the other columns |
+
+
+```{r}
+survey <- survey[,-c(3, 4, 7, 9, 10, 12, 13, 19, 20, 22:31)]
+```
+
+Next, before removing incomplete cases, it makes sense to look at where the incomplete cases could be coming from, and what the requirement was for suppressing values.
+
+```{r}
+# Count of missing values per TopicDesc value
+summary(survey[!complete.cases(survey),]$TopicDesc)
+summary(survey$TopicDesc)
+summary(survey[!complete.cases(survey),]$TopicDesc)/summary(survey$TopicDesc)
+
+range(survey$Sample_Size, na.rm=TRUE)
+```
+
+Most of the missing values come from the "Cessation (Youth)" topic. It appears that any result with a sample size lower than 50 youths was removed, and so a question that requires a sample of 50 youths who smoke would naturally fail to meet that requirement more than a question that simply requires a sample of 50 youths.
+
+```{r}
+# Count of missing values per Education value
+summary(survey[!complete.cases(survey),]$Education)
+summary(survey$Education)
+summary(survey[!complete.cases(survey),]$Education)/summary(survey$Education)
+```
+
+I guessed that middle schoolers were less likely to have a good sample size of smokers to survey, and it seems like that is correct. More than 10 times as many missing values are in middle school rows, with about 9 times as large a proportion of values missing from those rows. Additionally, since most of the missing values are related to stopping smoking, if most middle schoolers haven't even tried smoking they can't answer a question about stopping smoking.
+
+## Analyzing data
+
+Start with some quick summaries of the information we have.
+
+```{r}
+summary(as.factor(survey$YEAR))
+summary(survey$LocationAbbr)
+summary(survey$TopicDesc)
+summary(survey$MeasureDesc)
+summary(survey$Gender)
+```
+
+## Visualizing data
+
+#### Bar chart of cigarette use by measure ("Current", "Ever", and "Frequent") by year among high schoolers
+
+```{r}
+showdata1 <- survey[survey$TopicDesc == "Cigarette Use (Youth)" & survey$MeasureDesc == "Smoking Status" & survey$Education == "High School" & survey$Gender == "Overall",]
+
+showdata1 %>% group_by(YEAR, Response) %>%
+  summarize(Proportion_Response = sum(Data_Value / 100 * Sample_Size) / sum(Sample_Size)) %>% 
+  ggplot(mapping = aes(x = YEAR, y = Proportion_Response, fill = Response)) +
+    geom_bar(stat = "identity", position = "dodge") +
+    geom_smooth(method = 'lm', alpha = 0.2)
+```
+
+This chart shows the general progressive overall drop in "Frequent", "Current", and "those who have tried it" smokers in the last 17 years.
+
+#### Bar chart comparing "Frequent" cigarette usage between genders by year
+
+```{r}
+showdata2 <- survey[survey$TopicDesc == "Cigarette Use (Youth)" & survey$MeasureDesc == "Smoking Status" & survey$Education == "High School" & survey$Response == "Frequent" & survey$Gender != "Overall",]
+
+showdata2 %>% group_by(YEAR, Gender) %>%
+  summarize(Proportion_Response = sum(Data_Value / 100 * Sample_Size) / sum(Sample_Size)) %>% 
+  ggplot(mapping = aes(x = YEAR, y = Proportion_Response, fill = Gender)) +
+    geom_bar(stat = "identity", position = "dodge") +
+    geom_smooth(method = 'lm', alpha = 0.2)
+```
+
+This chart shows that over the 17 year period, the gap "per individual year" of males to females who consider themselves "frequent" smokers seems to stay the same (perhaps a more steady decrease for females than males if you take a closer look). But regardless, both have had a strong progressive downwards trend in numbers. 
+
+#### Bar chart comparing "Current" cigarette usage between genders by year
+
+```{r}
+showdata3 <- survey[survey$TopicDesc == "Cigarette Use (Youth)" & survey$MeasureDesc == "Smoking Status" & survey$Education == "High School" & survey$Response == "Current" & survey$Gender != "Overall",]
+
+showdata3 %>% group_by(YEAR, Gender) %>%
+  summarize(Proportion_Response = sum(Data_Value / 100 * Sample_Size) / sum(Sample_Size)) %>% 
+  ggplot(mapping = aes(x = YEAR, y = Proportion_Response, fill = Gender)) +
+    geom_bar(stat = "identity", position = "dodge") +
+    geom_smooth(method = 'lm', alpha = 0.2)
+```
+
+Over the alotted time, the gap "per individual year" of males who consider themselves "current" smokers has gradually become more than females who consider themselves "current" smokers.
+
+#### Bar chart comparing "Ever" cigarette usage between genders by year
+
+```{r}
+showdata4 <- survey[survey$TopicDesc == "Cigarette Use (Youth)" & survey$MeasureDesc == "Smoking Status" & survey$Education == "High School" & survey$Response == "Ever" & survey$Gender != "Overall",]
+
+showdata4 %>% group_by(YEAR, Gender) %>%
+  summarize(Proportion_Response = sum(Data_Value / 100 * Sample_Size) / sum(Sample_Size)) %>% 
+  ggplot(mapping = aes(x = YEAR, y = Proportion_Response, fill = Gender)) +
+    geom_bar(stat = "identity", position = "dodge") +
+    geom_smooth(method = 'lm', alpha = 0.2)
+```
+
+Though overall smoking in both genders has been decreasing over the years, when analyzing the last year of data, we have found that the probability of males willing to try smoking is greater than the probability of females willing to try.  
+
+## Specific problem analysis
+
+Let's look at just the year 2017, and specifically at youth smoking status. Even more specifically, we are only going to be looking at cases where the youth responded with "Smoking Status" "Ever", implying that they have ever tried smoking a cigarette, and additionally only cases where the surveyed youths were in high school.
+
+```{r}
+testdata <- survey[complete.cases(survey) & survey$YEAR == 2017 & survey$TopicDesc == "Cigarette Use (Youth)" & survey$MeasureDesc == "Smoking Status" & survey$Response == "Ever" & survey$Education == "High School",]
+
+# Splitting data by gender
+testdataM <- testdata[testdata$Gender == "Male",]
+testdataF <- testdata[testdata$Gender == "Female",]
+```
+
+#### Hypothesis testing
+
+Null hypothesis: male and female youths are equally likely to try smoking cigarettes. ProportionM = ProportionF.
+
+Alternative hypothesis: male and female youths are NOT equally likely to try smoking cigarettes. ProportionM != ProportionF.
+
+Significance level: 0.05
+
+```{r}
+# Calculating the total number of male youths who have ever used cigarettes and the sample size
+countsmokersM <- sum(testdataM$Data_Value / 100 * testdataM$Sample_Size)
+samplesizeM <- sum(testdataM$Sample_Size)
+
+# Calculating the total number of female youths who have ever used cigarettes and the sample size
+countsmokersF <- sum(testdataF$Data_Value / 100 * testdataF$Sample_Size)
+samplesizeF <- sum(testdataF$Sample_Size)
+
+# Proportion test between the proportion of male youths and female youths who have ever used cigarettes, with a 0.95 confidence interval
+prop.test(x = c(countsmokersM, countsmokersF), n = c(samplesizeM, samplesizeF))
+```
+
+We can see from this proportion test that there is a statistically significant difference in the proportions of male and female youths in high school in the year 2017 who have ever used cigarettes.
+
+#### Bootstrap confidence interval
+
+For the same situation, we can also calculate a confidence interval for the population of 2017 high schoolers in the entire United States.
+
+```{r}
+# Bootstrap mean function with 95% confidence interval and plot
+boot.mean <- function(x, B, binwidth = NULL) {
+  n = length(x)
+  boot.samples = matrix(sample(x,size=n*B,replace=TRUE), B, n)
+  boot.statistics = apply(boot.samples,1,mean)
+  se = sd(boot.statistics)
+  require(ggplot2)
+  if ( is.null(binwidth) )
+  binwidth = diff(range(boot.statistics))/30
+  p = ggplot(data.frame(x=boot.statistics),aes(x=x)) +
+  geom_histogram(aes(y=..density..),binwidth=binwidth) + geom_density(color="red")
+  plot(p)
+  interval = mean(x) + c(-1,1)*2*se
+  print( interval )
+  return( list(interval=interval, se=se) )
+}
+```
+
+```{r}
+# To maintain consistent results
+set.seed(1)
+
+# Selecting the appropriate data
+bootdata <- survey[complete.cases(survey) & survey$YEAR == 2017 & survey$TopicDesc == "Cigarette Use (Youth)" & survey$MeasureDesc == "Smoking Status" & survey$Response == "Ever" & survey$Education == "High School" & survey$Gender == "Male",]
+
+# Creating a vector of successes and failures based on the proportions per sample size
+bootvector <- c(rep(1, sum(round(bootdata$Data_Value / 100 * bootdata$Sample_Size))),
+                rep(0, sum(round((1 - bootdata$Data_Value / 100) * bootdata$Sample_Size))))
+
+boot.mean(bootvector, 1000)
+```
+
+Based on this data, we are 95% confident that the true proportion of 2017 male high schoolers in the United States who have ever smoked a cigarette is between 0.2628 and 0.2779.
+
+```{r}
+# To maintain consistent results
+set.seed(1)
+
+# Selecting the appropriate data
+bootdata <- survey[complete.cases(survey) & survey$YEAR == 2017 & survey$TopicDesc == "Cigarette Use (Youth)" & survey$MeasureDesc == "Smoking Status" & survey$Response == "Ever" & survey$Education == "High School" & survey$Gender == "Female",]
+
+# Creating a vector of successes and failures based on the proportions per sample size
+bootvector <- c(rep(1, sum(round(bootdata$Data_Value / 100 * bootdata$Sample_Size))),
+                rep(0, sum(round((1 - bootdata$Data_Value / 100) * bootdata$Sample_Size))))
+
+boot.mean(bootvector, 1000)
+```
+
+Based on this data, we are 95% confident that the true proportion of 2017 female high schoolers in the United States who have ever smoked a cigarette is between 0.2368 and 0.2514.
+
+## Conclusion
+
+From looking through this dataset, it became clear that United States youths have been smoking less, and that more recently male youths are more likely to try smoking than female youths. The dataset had some difficulties but it was interesting to analyze.
